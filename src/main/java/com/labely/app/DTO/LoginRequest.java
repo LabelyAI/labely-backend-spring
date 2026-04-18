@@ -1,7 +1,12 @@
 package com.labely.app.DTO;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "Credentials for login")
 public class LoginRequest {
+    @Schema(example = "user@example.com")
     private String email;
+    @Schema(example = "password123")
     private String password;
 
     // Constructors

@@ -1,9 +1,16 @@
 package com.labely.app.DTO;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "JWT token and user info returned after authentication")
 public class AuthResponse {
+    @Schema(description = "JWT bearer token")
     private String token;
+    @Schema(example = "user@example.com")
     private String email;
+    @Schema(example = "John")
     private String firstName;
+    @Schema(example = "Doe")
     private String lastName;
 
     // Constructors
