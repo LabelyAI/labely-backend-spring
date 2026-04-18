@@ -1,6 +1,7 @@
 package com.labely.app.Service;
 
 import com.labely.app.Entity.ImageMetadata;
+import com.labely.app.Entity.ImageStatus;
 import com.labely.app.Entity.User;
 import com.labely.app.Repository.ImageMetadataRepository;
 import com.labely.app.Repository.UserRepository;
@@ -35,15 +36,12 @@ public class R2StorageService {
     private String publicUrl;
 
     public ImageMetadata uploadImage(MultipartFile file, String userEmail, String description) throws IOException {
-        // Get user
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // Generate unique key for R2
         String fileExtension = getFileExtension(file.getOriginalFilename());
         String r2Key = "images/" + UUID.randomUUID().toString() + fileExtension;
 
-        // Upload to R2
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
                 .key(r2Key)
@@ -52,10 +50,8 @@ public class R2StorageService {
 
         s3Client.putObject(putObjectRequest, RequestBody.fromBytes(file.getBytes()));
 
-        // Create file URL
         String fileUrl = publicUrl + "/" + r2Key;
 
-        // Save metadata to database
         ImageMetadata metadata = new ImageMetadata(
                 file.getOriginalFilename(),
                 r2Key,
@@ -65,14 +61,38 @@ public class R2StorageService {
                 user
         );
         metadata.setDescription(description);
+        metadata.setStatus(ImageStatus.PENDING);
 
         return imageMetadataRepository.save(metadata);
+    }
+
+    public String uploadBytes(byte[] data, String keyPrefix, String extension, String contentType) {
+        String key = keyPrefix + "/" + UUID.randomUUID().toString() + (extension.startsWith(".") ? extension : "." + extension);
+
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key)
+                .contentType(contentType)
+                .build();
+
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+        return key;
+    }
+
+    public String publicUrlFor(String r2Key) {
+        return publicUrl + "/" + r2Key;
     }
 
     public List<ImageMetadata> getUserImages(String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        return imageMetadataRepository.findByUser(user);
+        return imageMetadataRepository.findByUserOrderByUploadedAtDesc(user);
+    }
+
+    public List<ImageMetadata> getUserImagesByStatus(String userEmail, ImageStatus status) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        return imageMetadataRepository.findByUserAndStatusOrderByUploadedAtDesc(user, status);
     }
 
     public ImageMetadata getImageById(Long id) {
@@ -84,21 +104,22 @@ public class R2StorageService {
         ImageMetadata metadata = imageMetadataRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Image not found"));
 
-        // Verify ownership
         if (!metadata.getUser().getEmail().equals(userEmail)) {
             throw new RuntimeException("Unauthorized to delete this image");
         }
 
-        // Delete from R2
+        deleteObject(metadata.getR2Key());
+
+        imageMetadataRepository.delete(metadata);
+    }
+
+    public void deleteObject(String r2Key) {
+        if (r2Key == null || r2Key.isBlank()) return;
         DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
                 .bucket(bucketName)
-                .key(metadata.getR2Key())
+                .key(r2Key)
                 .build();
-
         s3Client.deleteObject(deleteObjectRequest);
-
-        // Delete metadata from database
-        imageMetadataRepository.delete(metadata);
     }
 
     public byte[] downloadImage(String r2Key) {
