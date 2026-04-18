@@ -3,6 +3,7 @@ package com.labely.app.Controllers;
 import com.labely.app.Config.JwtUtil;
 import com.labely.app.DTO.AnnotationResponse;
 import com.labely.app.DTO.AnnotationRunRequest;
+import com.labely.app.DTO.ManualAnnotationRequest;
 import com.labely.app.DTO.ReviewDecisionRequest;
 import com.labely.app.Entity.AnnotationStatus;
 import com.labely.app.Service.AnnotationService;
@@ -124,6 +125,20 @@ public class AnnotationController {
                 return ResponseEntity.badRequest().body("decision is required");
             }
             return ResponseEntity.ok(annotationService.review(id, body.getDecision(), email));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "Save manually drawn bounding boxes for a rejected annotation", security = @SecurityRequirement(name = "bearerAuth"))
+    @PatchMapping("/{id}/manual")
+    public ResponseEntity<?> saveManual(
+            @PathVariable Long id,
+            @RequestBody ManualAnnotationRequest body,
+            @Parameter(hidden = true) @RequestHeader("Authorization") String authHeader) {
+        try {
+            String email = authenticate(authHeader);
+            return ResponseEntity.ok(annotationService.saveManual(id, body, email));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         }

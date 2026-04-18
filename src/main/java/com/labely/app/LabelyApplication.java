@@ -6,7 +6,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @SpringBootApplication
 @RestController
-public class LabelyApplication {
+public class
+LabelyApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(LabelyApplication.class, args);

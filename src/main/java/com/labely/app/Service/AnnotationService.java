@@ -3,6 +3,7 @@ package com.labely.app.Service;
 import com.labely.app.DTO.AnnotationResponse;
 import com.labely.app.DTO.AnnotationRunRequest;
 import com.labely.app.DTO.DetectionDTO;
+import com.labely.app.DTO.ManualAnnotationRequest;
 import com.labely.app.DTO.Sam3Response;
 import com.labely.app.Entity.Annotation;
 import com.labely.app.Entity.AnnotationStatus;
@@ -70,71 +71,101 @@ public class AnnotationService {
             throw new RuntimeException("No matching images found for this user");
         }
 
-        List<AnnotationResponse> results = new ArrayList<>();
+        List<byte[]> bytesList = new ArrayList<>();
+        List<String> fileNames = new ArrayList<>();
+        List<String> contentTypes = new ArrayList<>();
+
         for (ImageMetadata image : images) {
-            Annotation annotation = annotateSingleImage(image, user, request.getPrompt(), mode,
-                    confThreshold, largestComponent, returnImages);
-            results.add(toResponse(annotation));
+            image.setStatus(ImageStatus.PROCESSING);
+            imageMetadataRepository.save(image);
+            bytesList.add(r2StorageService.downloadImage(image.getR2Key()));
+            fileNames.add(image.getFileName());
+            contentTypes.add(image.getContentType());
+        }
+
+        List<Sam3Response> sam3Results = sam3Client.annotateBatch(
+                bytesList, fileNames, contentTypes, request.getPrompt(), mode, confThreshold, largestComponent, returnImages);
+
+        List<AnnotationResponse> results = new ArrayList<>();
+        for (int i = 0; i < images.size(); i++) {
+            ImageMetadata image = images.get(i);
+            try {
+                Sam3Response sam3 = sam3Results.get(i);
+                Annotation annotation = buildAnnotation(sam3, image, user, request.getPrompt(), mode,
+                        confThreshold, returnImages);
+                results.add(toResponse(annotationRepository.save(annotation)));
+                image.setStatus(ImageStatus.ANNOTATED);
+                image.setAnnotatedAt(LocalDateTime.now());
+            } catch (Exception e) {
+                image.setStatus(ImageStatus.FAILED);
+            }
+            imageMetadataRepository.save(image);
         }
         return results;
     }
 
-    private Annotation annotateSingleImage(ImageMetadata image, User user, String prompt, String mode,
-                                           double confThreshold, boolean largestComponent, boolean returnImages) {
-        image.setStatus(ImageStatus.PROCESSING);
-        imageMetadataRepository.save(image);
+    private Annotation buildAnnotation(Sam3Response sam3, ImageMetadata image, User user,
+                                       String prompt, String mode, double confThreshold, boolean returnImages) {
+        Annotation annotation = new Annotation();
+        annotation.setImage(image);
+        annotation.setUser(user);
+        annotation.setPrompt(prompt);
+        annotation.setMode(mode);
+        annotation.setConfThreshold(confThreshold);
+        annotation.setStatus(AnnotationStatus.UNREVIEWED);
+        annotation.setImageWidth(sam3.getImageSize() != null ? sam3.getImageSize().getW() : 0);
+        annotation.setImageHeight(sam3.getImageSize() != null ? sam3.getImageSize().getH() : 0);
+        annotation.setNumInstances(sam3.getNumInstances() != null ? sam3.getNumInstances() : 0);
 
-        try {
-            byte[] imageBytes = r2StorageService.downloadImage(image.getR2Key());
-            Sam3Response sam3 = sam3Client.annotate(imageBytes, image.getFileName(), image.getContentType(),
-                    prompt, mode, confThreshold, largestComponent, returnImages);
-
-            Annotation annotation = new Annotation();
-            annotation.setImage(image);
-            annotation.setUser(user);
-            annotation.setPrompt(prompt);
-            annotation.setMode(mode);
-            annotation.setConfThreshold(confThreshold);
-            annotation.setStatus(AnnotationStatus.UNREVIEWED);
-            annotation.setImageWidth(sam3.getImageSize() != null ? sam3.getImageSize().getW() : 0);
-            annotation.setImageHeight(sam3.getImageSize() != null ? sam3.getImageSize().getH() : 0);
-            annotation.setNumInstances(sam3.getNumInstances() != null ? sam3.getNumInstances() : 0);
-
-            if (returnImages && sam3.getOverlayPngB64() != null && !sam3.getOverlayPngB64().isBlank()) {
-                byte[] overlayBytes = Base64.getDecoder().decode(sam3.getOverlayPngB64());
-                String overlayKey = r2StorageService.uploadBytes(overlayBytes, "overlays", ".png", "image/png");
-                annotation.setOverlayR2Key(overlayKey);
-                annotation.setOverlayUrl(r2StorageService.publicUrlFor(overlayKey));
-            }
-            if (returnImages && sam3.getMaskPngB64() != null && !sam3.getMaskPngB64().isBlank()) {
-                byte[] maskBytes = Base64.getDecoder().decode(sam3.getMaskPngB64());
-                String maskKey = r2StorageService.uploadBytes(maskBytes, "masks", ".png", "image/png");
-                annotation.setMaskR2Key(maskKey);
-                annotation.setMaskUrl(r2StorageService.publicUrlFor(maskKey));
-            }
-
-            List<Detection> detections = new ArrayList<>();
-            if (sam3.getDetections() != null) {
-                for (Sam3Response.Sam3Detection d : sam3.getDetections()) {
-                    Detection det = new Detection(annotation, prompt,
-                            d.getX1(), d.getY1(), d.getX2(), d.getY2(), d.getScore());
-                    detections.add(det);
-                }
-            }
-            annotation.setDetections(detections);
-
-            Annotation saved = annotationRepository.save(annotation);
-
-            image.setStatus(ImageStatus.ANNOTATED);
-            image.setAnnotatedAt(LocalDateTime.now());
-            imageMetadataRepository.save(image);
-
-            return saved;
-        } catch (Exception e) {
-            image.setStatus(ImageStatus.FAILED);
-            imageMetadataRepository.save(image);
-            throw new RuntimeException("Annotation failed for image " + image.getId() + ": " + e.getMessage(), e);
+        if (returnImages && sam3.getOverlayPngB64() != null && !sam3.getOverlayPngB64().isBlank()) {
+            byte[] overlayBytes = Base64.getDecoder().decode(sam3.getOverlayPngB64());
+            String overlayKey = r2StorageService.uploadBytes(overlayBytes, "overlays", ".png", "image/png");
+            annotation.setOverlayR2Key(overlayKey);
+            annotation.setOverlayUrl(r2StorageService.publicUrlFor(overlayKey));
         }
+        if (returnImages && sam3.getMaskPngB64() != null && !sam3.getMaskPngB64().isBlank()) {
+            byte[] maskBytes = Base64.getDecoder().decode(sam3.getMaskPngB64());
+            String maskKey = r2StorageService.uploadBytes(maskBytes, "masks", ".png", "image/png");
+            annotation.setMaskR2Key(maskKey);
+            annotation.setMaskUrl(r2StorageService.publicUrlFor(maskKey));
+        }
+
+        List<Detection> detections = new ArrayList<>();
+        if (sam3.getDetections() != null) {
+            for (Sam3Response.Sam3Detection d : sam3.getDetections()) {
+                detections.add(new Detection(annotation, prompt,
+                        d.getX1(), d.getY1(), d.getX2(), d.getY2(), d.getScore()));
+            }
+        }
+        annotation.setDetections(detections);
+        return annotation;
+    }
+
+    @Transactional
+    public AnnotationResponse saveManual(Long id, ManualAnnotationRequest request, String userEmail) {
+        Annotation a = annotationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Annotation not found"));
+        if (!a.getUser().getEmail().equals(userEmail)) {
+            throw new RuntimeException("Unauthorized");
+        }
+
+        String label = (request.getLabel() != null && !request.getLabel().isBlank())
+                ? request.getLabel() : a.getPrompt();
+
+        a.getDetections().clear();
+        if (request.getBoxes() != null) {
+            for (ManualAnnotationRequest.ManualBox box : request.getBoxes()) {
+                a.getDetections().add(new Detection(a, label, box.getX1(), box.getY1(), box.getX2(), box.getY2(), 1.0));
+            }
+        }
+        a.setNumInstances(a.getDetections().size());
+        a.setStatus(AnnotationStatus.UNREVIEWED);
+        a.setOverlayUrl(null);
+        a.setOverlayR2Key(null);
+        a.setMaskUrl(null);
+        a.setMaskR2Key(null);
+
+        return toResponse(annotationRepository.save(a));
     }
 
     @Transactional(readOnly = true)
