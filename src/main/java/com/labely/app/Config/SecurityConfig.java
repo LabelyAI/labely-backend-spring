@@ -37,6 +37,7 @@ public class SecurityConfig {
                     "/api/annotations/**",
                     "/api/dataset/**",
                     "/api/sam3/**",
+                    "/api/defectx/**",
                     "/swagger-ui/**",
                     "/v3/api-docs/**",
                     "/swagger-ui.html"

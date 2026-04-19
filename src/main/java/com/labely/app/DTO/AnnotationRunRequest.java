@@ -25,6 +25,9 @@ public class AnnotationRunRequest {
     @Schema(description = "If true SAM3 returns overlay + mask PNGs (base64). Default true.", defaultValue = "true")
     private Boolean returnImages;
 
+    @Schema(description = "DefectX reference project id (required when mode=defectx)")
+    private String defectxProjectId;
+
     public List<Long> getImageIds() { return imageIds; }
     public void setImageIds(List<Long> imageIds) { this.imageIds = imageIds; }
     public String getPrompt() { return prompt; }
@@ -37,4 +40,6 @@ public class AnnotationRunRequest {
     public void setLargestComponent(Boolean largestComponent) { this.largestComponent = largestComponent; }
     public Boolean getReturnImages() { return returnImages; }
     public void setReturnImages(Boolean returnImages) { this.returnImages = returnImages; }
+    public String getDefectxProjectId() { return defectxProjectId; }
+    public void setDefectxProjectId(String defectxProjectId) { this.defectxProjectId = defectxProjectId; }
 }

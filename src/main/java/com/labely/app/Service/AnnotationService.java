@@ -32,6 +32,9 @@ public class AnnotationService {
     private Sam3Client sam3Client;
 
     @Autowired
+    private DefectXClient defectXClient;
+
+    @Autowired
     private R2StorageService r2StorageService;
 
     @Autowired
@@ -83,8 +86,22 @@ public class AnnotationService {
             contentTypes.add(image.getContentType());
         }
 
-        List<Sam3Response> sam3Results = sam3Client.annotateBatch(
-                bytesList, fileNames, contentTypes, request.getPrompt(), mode, confThreshold, largestComponent, returnImages);
+        List<Sam3Response> sam3Results;
+        if ("defectx".equalsIgnoreCase(mode)) {
+            if (request.getDefectxProjectId() == null || request.getDefectxProjectId().isBlank()) {
+                for (ImageMetadata image : images) {
+                    image.setStatus(ImageStatus.PENDING);
+                    imageMetadataRepository.save(image);
+                }
+                throw new RuntimeException("defectxProjectId is required for mode=defectx. Upload baseline images first.");
+            }
+            sam3Results = defectXClient.detectBatch(
+                    bytesList, fileNames, contentTypes,
+                    request.getDefectxProjectId(), request.getPrompt(), confThreshold);
+        } else {
+            sam3Results = sam3Client.annotateBatch(
+                    bytesList, fileNames, contentTypes, request.getPrompt(), mode, confThreshold, largestComponent, returnImages);
+        }
 
         List<AnnotationResponse> results = new ArrayList<>();
         for (int i = 0; i < images.size(); i++) {
