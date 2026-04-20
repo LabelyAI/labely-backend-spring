@@ -57,14 +57,17 @@ public class AnnotationService {
         if (request.getImageIds() == null || request.getImageIds().isEmpty()) {
             throw new RuntimeException("imageIds is required");
         }
-        if (request.getPrompt() == null || request.getPrompt().isBlank()) {
-            throw new RuntimeException("prompt is required");
-        }
 
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         String mode = (request.getMode() == null || request.getMode().isBlank()) ? defaultMode : request.getMode();
+
+        // DefectX does not require a text prompt (it uses PatchCore baseline instead)
+        if (!"defectx".equalsIgnoreCase(mode) &&
+                (request.getPrompt() == null || request.getPrompt().isBlank())) {
+            throw new RuntimeException("prompt is required");
+        }
         double confThreshold = request.getConfThreshold() != null ? request.getConfThreshold() : defaultConfThreshold;
         boolean largestComponent = request.getLargestComponent() == null || request.getLargestComponent();
         boolean returnImages = request.getReturnImages() == null || request.getReturnImages();
